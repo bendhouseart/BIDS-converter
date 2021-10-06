@@ -13,12 +13,13 @@ data_dir = code_dir.parent
 
 # collect ecat header maps
 try:
-    with open(join(parent_dir,  'ecat_headers.json'), 'r') as infile:
+    with open(join(parent_dir, 'ecat_headers.json'), 'r') as infile:
         ecat_header_maps = json.load(infile)
 except FileNotFoundError:
     raise Exception("Unable to load header definitions and map from ecat_headers.json. Aborting.")
 
 
+# noinspection PyShadowingNames
 def get_ecat_bytes(path_to_ecat: str):
     """
     Opens an ecat file and reads the entrie file into memory to return a bytes object
@@ -94,67 +95,98 @@ def get_buffer_size(data_type, variable_name):
     return scalar
 
 
-def get_header_data(header_data_map: dict = {}, ecat_file: str = '', byte_offset: int = 0):
+def get_header_data(header_data_map, ecat_file: str = '', byte_offset: int = 0, clean=True):
     """
-    Collects the header data from an ecat file, by default starts at byte position 0 (aka byte offset)
-    for any header that is not the main header this offset will need to be provided
-    :param header_data_map: The dictionary mapping of header data this dict must have following form:
-    "ecat72_mainheader": [
-      {
-        "byte": 0,
-        "variable_name": "MAGIC_NUMBER",
-        "type": "Character*14",
-        "comment": "UNIX file type identification number (NOT PART OF THE MATRIX HEADER DATA)"
-      },
-      {
-        "byte": 14,
-        "variable_name": "ORIGINAL_FILE_NAME",
-        "type": "Character*32",
-        "comment": "Scan file’s creation name"
-      },
-      {
-        "byte": 46,
-        "variable_name": "SW_VERSION",
-        "type": "Integer*2",
-        "comment": "Software version number"
-      },
-      .
-      .
-      .
-     ]
-    :param ecat_file: the path to the ecat file that is being read
-    :param byte_offset: position to start reading bytes at, the data in the header_data_map is relative
-    to this value. E.g. the main header lies at byte 0 of the ecat_file while, the subheader for frame n
-    lies at byte n*512
-    :return: a dictionary w/ keys corresponding to the variable_name in each header field and their
-    accompanying values and the last byte position read e.g. -> {'key': value, ....}, 512
+
+    :param header_data_map: schema for reading in header data, this is stored in dictionary that is read in from a
+    json file.
+    :param ecat_file: path to an ecat file, file is opened and byte blocks containing header data are then extracted,
+    read, and cleaned into python float, int, or list data types
+    :param byte_offset: off set from the head of the file to read from
+    :param clean: Whether to remove byte padding or not, if not provided strings will include padding w/ \0x bytes and
+    lists/arrays of data will be returned as tuples instead of lists. Uncleaned data will be of format b''.
+    :return: a dictionary with variable names of header fields as keys and cleaned/uncleaned header fields as values
     """
     header = {}
-    for values in header_data_map:
-        byte_position, data_type, variable_name = values['byte'], values['type'], values['variable_name']
-        byte_width = get_buffer_size(data_type, variable_name)
+
+    for value in header_data_map:
+        byte_position, variable_name, struct_fmt = value['byte'], value['variable_name'], '>' + value['struct']
+        byte_width = struct.calcsize(struct_fmt)
         relative_byte_position = byte_position + byte_offset
         raw_bytes = read_bytes(ecat_file, relative_byte_position, byte_width)
-        if 'Character' in data_type:
-            raw_bytes_filtered = bytes(filter(None, raw_bytes))
-            decoded_bytes = str(raw_bytes_filtered, 'UTF-8')
-        elif 'Integer' in data_type:
-            # we let python's int do the heavy lifting here since python only has 1 type anyway, no issues w/ this
-            # instead of using struct.unpack.
-            decoded_bytes = int.from_bytes(raw_bytes, 'big')
-        elif 'Real' in data_type:
-            # using struct and c data types to decode
-            number_of_fs = int(byte_width / 4)  # this corresponds to the number of bytes the variable has Real*4 -> 1
-            something_to_real = struct.unpack('>' + number_of_fs * 'f', raw_bytes)  # apply the f width to decode
-            if len(something_to_real) > 1:
-                decoded_bytes = list(something_to_real)
-            else:
-                decoded_bytes = something_to_real[0]
-
-        header[variable_name] = decoded_bytes
+        header[variable_name] = struct.unpack(struct_fmt, raw_bytes)
+        if clean and 'fill' not in variable_name.lower():
+            header[variable_name] = filter_bytes(header[variable_name], struct_fmt)
         read_head_position = relative_byte_position + byte_width
 
     return header, read_head_position
+
+
+def filter_bytes(unfiltered, struct_fmt):
+    """
+    Cleans up byte strings and bytes types into python int, float, string, and list data types, additionally
+    struct.unpack returns a tuple object even if only a single value is available, this function determines when to
+    return a single value or a list of values based on the contents of the unfiltered object.
+    :param unfiltered: a raw bytes type object
+    :param struct_fmt: the c struct type of the object
+    :return: a cleaned python int, float, string, or list
+    """
+    if len(unfiltered) == 1:
+        unfiltered = unfiltered[0]
+    elif len(unfiltered) > 1:
+        unfiltered = list(unfiltered)
+    if 's' in struct_fmt:
+        filtered = str(bytes(filter(None, unfiltered)), 'UTF-8')
+    else:
+        filtered = unfiltered
+    return filtered
+
+
+def get_directory_data(byte_block, ecat_file, return_raw = False):
+    directory = None  # used to keep track of state in the event of a directory spanning more than one 512 byte block
+    raw = []
+    while True:
+        # The exit conditions for this loop are below
+        # if [4,1] of the directory is 0 break as there are 31 or less frames in this 512 byte buffer
+        # if [2,1] of the directory is 2 break ????, up for interpretation as to the exact meaning but,
+        # observed to signal the end of an additional 512 byte block/buffer when the number of frames
+        # exceeds 31
+
+        read_byte_array = numpy.frombuffer(byte_block, dtype=numpy.dtype('>i4'), count=-1)
+        # reshape 1d array into 2d, a 4 row by 32 column table is expected
+        reshaped = numpy.transpose(numpy.reshape(read_byte_array, (-1, 4)))
+
+        raw.append(reshaped)
+
+        # chop off columns after 32, rows after 32 appear to be noise
+        reshaped = reshaped[:, 0:read_byte_array[3] + 1]
+        # get directory size/number of frames in dir from 1st column 4th row of the array in the buffer
+        directory_size = reshaped[3, 0]
+        if directory_size == 0:
+            break
+        # on the first pass do this
+        if directory is None:
+            directory = reshaped[:, 1:directory_size + 1]
+        else:
+            directory = numpy.append(directory, reshaped[:, 1:directory_size + 1], axis=1)
+        # determine if this is the last directory by examining the 2nd row of the first column of the buffer
+        next_directory_position = reshaped[1, 0]
+        if next_directory_position == 2:
+            break
+        # looks like there is more directory to read, collect some more bytes
+        byte_block = read_bytes(
+            path_to_bytes=ecat_file,
+            byte_start=(next_directory_position - 1) * 512,
+            byte_stop=512
+        )
+
+    # sort the directory contents as they're sometimes out of order
+    sorted_directory = directory[:, directory[0].argsort()]
+
+    if return_raw:
+        return raw
+    else:
+        return sorted_directory
 
 
 def read_ecat(ecat_file: str, calibrated: bool = False, collect_pixel_data: bool = True):
@@ -163,6 +195,7 @@ def read_ecat(ecat_file: str, calibrated: bool = False, collect_pixel_data: bool
 
     :param ecat_file: path to an ecat file, does not handle compression currently
     :param calibrated: if True, will scale the raw imaging data by the SCALE_FACTOR in the subheader and
+    :param collect_pixel_data: By default collects the entire ecat, can be passed false to only return headers
     CALIBRATION_FACTOR in the main header
     :return: main_header, a list of subheaders for each frame, the imagining data from the subheaders
     """
@@ -171,30 +204,22 @@ def read_ecat(ecat_file: str, calibrated: bool = False, collect_pixel_data: bool
     for entry, dictionary in ecat_header_maps['ecat_headers'].items():
         possible_ecat_headers[entry] = dictionary['mainheader']
 
-    read_headers = {}
+    confirmed_version = None
     for version, dictionary in possible_ecat_headers.items():
         try:
-            read_headers[version], _ = get_header_data(dictionary, ecat_file)
+            possible_header, _ = get_header_data(dictionary, ecat_file)
+            if version == str(possible_header['SW_VERSION']):
+                confirmed_version = version
+                break
         except UnicodeDecodeError:
-            pass
+            continue
 
-    # check on whether or not it's an ecat 6 or 7
-    for version, values in read_headers.items():
-        # note this is untested for ecat versions <7.x and may need to be refactored if the 6.X version field is not
-        # of the form 'SW_VERSION'=XX where XX is an int16. This will work for 7.2 and 7.3 however as their respective
-        # sw versions are: 'SW_VERSION'=72 and 'SW_VERSION'=73 respectively.
-        if version == values.get('SW_VERSION', None):
-            ecat_version = version
-            break
-        else:
-            # we've yet to see any images yet that aren't 7.3 so it's a safe bet
-            ecat_version = 73
+    if not confirmed_version:
+        raise Exception(f"Unable to determine ECAT File Type from these types {possible_ecat_headers.keys()}")
 
-    ecat_main_header = ecat_header_maps['ecat_headers'][str(ecat_version)]['mainheader']
+    ecat_main_header = ecat_header_maps['ecat_headers'][confirmed_version]['mainheader']
 
     main_header, read_to = get_header_data(ecat_main_header, ecat_file)
-    # end collect main header
-
     """
     Some notes about the file directory/sorted directory:
     
@@ -223,41 +248,7 @@ def read_ecat(ecat_file: str, calibrated: bool = False, collect_pixel_data: bool
         byte_start=read_to,
         byte_stop=read_to + 512)
 
-    directory = None  # used to keep track of state in the event of a directory spanning more than one 512 byte block
-    while True:
-        # The exit conditions for this loop are below
-        # if [4,1] of the directory is 0 break as there are 31 or less frames in this 512 byte buffer
-        # if [2,1] of the directory is 2 break ???? up for interpretation as to the exact meaning but,
-        # observed to signal the end of an additional 512 byte block/buffer when the number of frames
-        # exceeds 31
-
-        read_byte_array = numpy.frombuffer(next_block, dtype=numpy.dtype('>i4'), count=-1)
-        # reshape 1d array into 2d, a 4 row by 32 column table is expected
-        reshaped = numpy.transpose(numpy.reshape(read_byte_array, (-1, 4)))
-        # chop off columns after 32, rows after 32 appear to be noise
-        reshaped = reshaped[:, 0:32]
-        # get directory size/number of frames in dir from 1st column 4th row of the array in the buffer
-        directory_size = reshaped[3, 0]
-        if directory_size == 0:
-            break
-        # on the first pass do this
-        if directory is None:
-            directory = reshaped[:, 1:directory_size + 1]
-        else:
-            directory = numpy.append(directory, reshaped[:, 1:directory_size + 1], axis=1)
-        # determine if this is the last directory by examining the 2nd row of the first column of the buffer
-        next_directory_position = reshaped[1, 0]
-        if next_directory_position == 2:
-            break
-        # looks like there is more directory to read, collect some more bytes
-        next_block = read_bytes(
-            path_to_bytes=ecat_file,
-            byte_start=(next_directory_position-1) * 512,
-            byte_stop=next_directory_position * 512
-        )
-
-    # sort the directory contents as they're sometimes out of order
-    sorted_directory = directory[:, directory[0].argsort()]
+    directory = get_directory_data(next_block, ecat_file)
 
     # determine subheader type by checking main header
     subheader_type_number = main_header['FILE_TYPE']
@@ -301,20 +292,20 @@ def read_ecat(ecat_file: str, calibrated: bool = False, collect_pixel_data: bool
     """
 
     # collect the bytes map file for the designated subheader, note some are not supported.
-    subheader_map = ecat_header_maps['ecat_headers'][str(ecat_version)][str(subheader_type_number)]
+    subheader_map = ecat_header_maps['ecat_headers'][confirmed_version][str(subheader_type_number)]
 
     if not subheader_map:
         raise Exception(f"Unsupported data type: {subheader_type_number}")
 
     # collect subheaders and pixel data
     subheaders, data = [], []
-    for i in range(len(sorted_directory.T)):
+    for i in range(len(directory.T)):
         frame_number = i + 1
         if collect_pixel_data:
             print(f"Reading subheader from frame {frame_number}")
 
         # collect frame info/column
-        frame_info = sorted_directory[:, i]
+        frame_info = directory[:, i]
         frame_start = frame_info[1]
         frame_stop = frame_info[2]
 
@@ -340,21 +331,10 @@ def read_ecat(ecat_file: str, calibrated: bool = False, collect_pixel_data: bool
                     pixel_data_type = '>i2'
 
                 # read it into a one dimensional matrix
-                pixel_data_matrix = numpy.frombuffer(pixel_data,
-                                                     dtype=numpy.dtype(pixel_data_type),
-                                                     count=image_size[0] * image_size[1] * image_size[2])
-                # reshape 1d matrix into 2d, using order F for fortran to keep parity w/ matlab converters
-                pixel_data_matrix_2d = numpy.reshape(pixel_data_matrix,
-                                                     (image_size[0] * image_size[1], image_size[2]),
-                                                     order='F')
-                # just making debugging less awful memory wise
-                del pixel_data_matrix
-                # reshape into 3d
-                pixel_data_matrix_3d = numpy.reshape(pixel_data_matrix_2d,
-                                                     (image_size[0], image_size[1], image_size[2]),
-                                                     order='F')
-                # again freeing memory manually, python probably takes care of this and this is unnecessary
-                del pixel_data_matrix_2d
+                pixel_data_matrix_3d = numpy.frombuffer(pixel_data,
+                                                        dtype=numpy.dtype(pixel_data_type),
+                                                        count=image_size[0] * image_size[1] * image_size[2]).reshape(
+                    *image_size, order='F')
             else:
                 raise Exception(f"Unable to determine frame image size, unsupported image type {subheader_type_number}")
 
