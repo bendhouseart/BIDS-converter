@@ -57,26 +57,26 @@ jobs:
 
       - name: Install Python Requirements
         if: steps.cache-python.outputs.cache-hit != 'true'
-        run: pip3 install -r python/requirements.txt
+        run: pip install -r python/requirements.txt
 
       - name: Test CLI --help
-        run: python3 python/main.py --help
+        run: python python/main.py --help
 
       - name: Test CLI Ecat Dump
-        run: "python3 python/main.py ${{ env.REAL_TEST_ECAT_PATH }} --dump"
+        run: "python python/main.py ${{ env.REAL_TEST_ECAT_PATH }} --dump"
 
       - name: Copy Test File(s) to tests/
         run: cp ${{ env.SMALLER_ECAT_PATH }} python/tests/
 
       - name: Test ecatread
-        run: "cd python/ && python3 -m tests.test_ecatread"
+        run: "cd python/ && python -m tests.test_ecatread"
 
       - name: Test helper_functions
-        run: "cd python/ && python3 -m tests.test_helper_functions"
+        run: "cd python/ && python -m tests.test_helper_functions"
 
       - name: Test nifti write
-        run: "cd python/ && python3 -m tests.test_nifti_write"
+        run: "cd python/ && python -m tests.test_nifti_write"
 
       - name: Test bytes
-        run: "cd python/ && python3 -m tests.test_thisbytes"
+        run: "cd python/ && python -m tests.test_thisbytes"
 
