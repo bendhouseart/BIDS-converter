@@ -17,3 +17,9 @@ jobs:
 
       - name: List Working Dir Contents
         run: ls -l
+
+      - name: Install Python Requirements
+        run: pip3 install -r python/requirements.txt
+
+      - name: Test CLI --help
+        run: python3 python/main.py --help
