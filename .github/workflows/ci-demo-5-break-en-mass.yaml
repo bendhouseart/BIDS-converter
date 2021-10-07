@@ -1,4 +1,4 @@
-name: CI_Demo_4
+name: CI_Demo_5
 on:
   workflow_dispatch:
   push:
@@ -24,6 +24,7 @@ jobs:
     strategy:
       matrix:
         os: [macOS-latest, ubuntu-latest]
+        python-version: [ '3.5', '3.6', '3.7', '3.8', '3.9' ]
 
     steps:
       - name: Checkout Repo
@@ -48,7 +49,7 @@ jobs:
         id: setup-python
         uses: actions/setup-python@v2
         with:
-          python-version: 3.7
+          python-version: ${{ matrix.python-version }}
 
       - name: Cache Python
         id: cache-python
