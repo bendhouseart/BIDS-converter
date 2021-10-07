@@ -23,20 +23,36 @@ jobs:
     steps:
       - name: Checkout Repo
         uses: actions/checkout@v2
-      
-      - name: Collect ECAT Dataset w/ Curl
+
+      - name: Cache ECAT
+        id: cache-ecat
+        uses: actions/cache@v2
+        with:
+          path: cimbi36
+          key: ${{ runner.os }}-ecats
+
+      - name: Collect Ecat Dataset w/ curl
+        if: steps.cache-ecat.outputs.cache-hit != 'true'
         run: "curl -o ecat_test ${{ env.ECAT_URL }}"
-    
+
       - name: Decompress dataset
+        if: steps.cache-ecat.outputs.cache-hit != 'true'
         run: "tar xvzf ecat_test && rm ecat_test"
+      
+      - name: Setup Python
+        uses: actions/setup-python@v1
+        with:
+          python-version: 3.7
 
-      - name: Get Working Dir
-        run: pwd
-
-      - name: List Working Dir Contents
-        run: ls -l
+      - name: Cache Python
+        id: cache-python
+        uses: actions/cache@v2
+        with:
+          path: ~/.cache/pip
+          key: ${{ hashFiles('setup.py') }}-${{ hashFiles('requirements.txt') }}
 
       - name: Install Python Requirements
+        if: steps.cache-python.outputs.cache-hit != 'true'
         run: pip3 install -r python/requirements.txt
 
       - name: Test CLI --help
