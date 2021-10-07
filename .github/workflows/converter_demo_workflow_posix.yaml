@@ -1,5 +1,6 @@
-name: Python ECAT Test
+name: CI_Demo_1
 on:
+  workflow_dispatch:
   push:
   pull_request:
     branches:
