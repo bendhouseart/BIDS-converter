@@ -1,7 +1,6 @@
 # BIDS-converter
 
-![BIDS-converter main](https://github.com/openneuropet/BIDS-converter/actions/workflows/setup_and_cli_test_posix.yaml/badge.svg)
-
+[![CI_Demo_1](https://github.com/bendhouseart/BIDS-converter/actions/workflows/ci-demo-1-setting-up.yaml/badge.svg)](https://github.com/bendhouseart/BIDS-converter/actions/workflows/ci-demo-1-setting-up.yaml)
 
 This repository is hosting tools to curate PET brain data using the [Brain Imaging Data Structure Specification](https://bids-specification.readthedocs.io/en/stable/04-modality-specific-files/09-positron-emission-tomography.html). 
 
