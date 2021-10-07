@@ -1,6 +1,6 @@
 name: CI_Demo_4
 on:
-  workflow_dispatch
+  workflow_dispatch:
   push:
   pull_request:
     branches:
