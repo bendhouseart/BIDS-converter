@@ -26,6 +26,9 @@ jobs:
       
       - name: Collect ECAT Dataset w/ Curl
         run: "curl -o ecat_test ${{ env.ECAT_URL }}"
+    
+      - name: Decompress dataset
+        run: "tar xvzf ecat_test && rm ecat_test"
 
       - name: Get Working Dir
         run: pwd
