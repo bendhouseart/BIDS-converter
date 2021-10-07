@@ -1,0 +1,20 @@
+name: CI_Demo_1
+on:
+  workflow_dispatch:
+  push:
+  pull_request:
+    branches:
+      - main
+  
+jobs:
+  Test:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repo
+        uses: actions/checkout@v2
+      
+      - name: Get Working Dir
+        run: pwd
+
+      - name: List Working Dir Contents
+        run: ls -l
