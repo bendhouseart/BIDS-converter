@@ -6,7 +6,7 @@ on:
       - main
   
 jobs:
-  Collect-Data-and-Test:
+  Test:
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Repo
