@@ -15,4 +15,5 @@ This folder contains examples of Siemens/Philips/GE PET scanner data.
 
 ## Metadata_in
 
-This folder contains exemples of metadata collected through spearsheet and how one can reorganize and convert such metadata.
+This folder contains exemples of metadata collected through spearsheet and how one can 
+reorganize and convert such metadata.
